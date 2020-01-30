@@ -4,6 +4,7 @@ open import Prelude
 open import Function
 open import Level
 open import Category.Monad
+open import Data.Bool renaming (true to left; false to right)
 
 open import Relation.Unary.PredicateTransformer using (PT; Pt)
 open import Relation.Ternary.Separation.Construct.Unit
@@ -15,7 +16,7 @@ open import Relation.Ternary.Separation.Monad.Delay
 
 data Ty : Set where
   unit : Ty
-  _⊸_  : (a b : Ty) → Ty
+  _⊸_ _w&_ : (a b : Ty) → Ty
 
 open import Relation.Ternary.Separation.Construct.List Ty
 
@@ -41,6 +42,10 @@ data Exp : Ty → Ctx → Set where
   ap  : ∀[ Exp (a ⊸ b) ✴ Exp a ⇒ Exp b ]
   var : ∀[ Just a ⇒ Exp a ]
 
+  -- with products
+  wth : ∀[ (Exp a ∩ Exp b) ⇒ Exp (a w& b) ]
+  proj : ∀ d → ∀[ Exp (a w& b) ⇒ Exp (if d then a else b) ]
+
 module _ {{m : MonoidalSep 0ℓ}} where
   open MonoidalSep m using (Carrier)
 
@@ -54,6 +59,7 @@ module _ {{m : MonoidalSep 0ℓ}} where
     data Val : Ty → CPred where
       tt    : ε[ Val unit ]
       clos  : Exp b (a ∷ Γ) → ∀[ Env Γ ⇒ Val (a ⊸ b) ]
+      wth   : Exp a Γ → Exp b Γ → ∀[ Env Γ ⇒ Val (a w& b) ]
 
   module _ {i : Size} where
     open ReaderTransformer id-morph Val (Delay i) public
@@ -82,10 +88,24 @@ module _ {{m : MonoidalSep 0ℓ}} where
       clos body env ← frame Γ≺ (►eval f)
       v ×⟨ σ ⟩ env  ← ►eval e & env
       empty         ← append (v :⟨ σ ⟩: env)
-      ►eval body 
+      ►eval body
 
     eval (var refl) = do
       lookup
+
+    eval (wth (eₗ , eᵣ)) = do
+      env ← ask
+      return (wth eₗ eᵣ env)
+
+    eval (proj left e) = do
+      wth eₗ eᵣ env ← ►eval e
+      empty         ← append env
+      ►eval eₗ
+
+    eval (proj right e) = do
+      wth eₗ eᵣ env ← ►eval e
+      empty         ← append env
+      ►eval eᵣ
 
     ►eval : ∀ {i} → Exp a Γ → ε[ M i Γ ε (Val a) ]
     app (►eval e) E σ = later (λ where .force → app (eval e) E σ)
